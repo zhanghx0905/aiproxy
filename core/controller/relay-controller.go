@@ -31,6 +31,7 @@ import (
 	"github.com/labring/aiproxy/core/relay/plugin/cachefollow"
 	monitorplugin "github.com/labring/aiproxy/core/relay/plugin/monitor"
 	"github.com/labring/aiproxy/core/relay/plugin/patch"
+	"github.com/labring/aiproxy/core/relay/plugin/rerankwindow"
 	"github.com/labring/aiproxy/core/relay/plugin/streamfake"
 	"github.com/labring/aiproxy/core/relay/plugin/thinksplit"
 	"github.com/labring/aiproxy/core/relay/plugin/timeout"
@@ -240,6 +241,7 @@ func wrapPlugin(ctx context.Context, mc *model.ModelCaches, a adaptor.Adaptor) a
 		monitorplugin.NewGroupMonitorPlugin(),
 		cache.NewCachePlugin(common.RDB),
 		cachefollow.NewCacheFollowPlugin(),
+		rerankwindow.NewPlugin(),
 		streamfake.NewStreamFakePlugin(),
 		timeout.NewTimeoutPlugin(),
 		websearch.NewWebSearchPlugin(func(modelName string) (*model.Channel, error) {

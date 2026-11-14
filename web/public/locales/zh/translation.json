@@ -535,6 +535,20 @@
         "cacheHitHeader": "缓存命中头名称",
         "cacheHitHeaderPlaceholder": "输入头名称"
       },
+      "rerankWindow": {
+        "title": "长文分窗评分",
+        "description": "将长文分为重叠窗口评分，按最高窗口分数对原文排序。超出长度或窗口数量限制时返回错误。",
+        "max_tokens": "模型单次输入上限（tokens）",
+        "overlap_tokens": "重叠 tokens",
+        "special_tokens": "句对特殊 tokens",
+        "safety_tokens": "窗口边界预留 tokens",
+        "batch_size": "每批窗口数",
+        "max_document_tokens": "单篇文档 tokens 上限",
+        "max_windows": "单次请求窗口数上限",
+        "timeout_seconds": "总处理超时（秒）",
+        "tokenizer_url": "模型分词接口（可选）",
+        "tokenizerHelp": "TEI 渠道留空时使用渠道的 /tokenize；其他渠道需提供使用相同模型 tokenizer 的 TEI 协议接口。默认 512 / 4 适用于 BCE；更换模型时请核对输入上限和句对特殊 tokens。"
+      },
       "cacheFollowPlugin": {
         "title": "缓存跟随插件",
         "description": "默认支持基于 prompt_cache_key 的定向渠道跟随，以及 user 范围的缓存渠道跟随，用于提高上游缓存命中率。通用缓存渠道跟随需要显式开启。默认关闭。",

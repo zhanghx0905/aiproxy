@@ -546,6 +546,20 @@
         "cacheHitHeader": "Cache hit header name",
         "cacheHitHeaderPlaceholder": "Enter header name"
       },
+      "rerankWindow": {
+        "title": "Long-document window scoring",
+        "description": "Score overlapping document windows and rank original documents by their highest window score. Inputs exceeding document or window limits return an error.",
+        "max_tokens": "Model input limit (tokens)",
+        "overlap_tokens": "Overlap tokens",
+        "special_tokens": "Special tokens per query-document pair",
+        "safety_tokens": "Window boundary token reserve",
+        "batch_size": "Windows per batch",
+        "max_document_tokens": "Maximum tokens per document",
+        "max_windows": "Maximum windows per request",
+        "timeout_seconds": "Total processing timeout (seconds)",
+        "tokenizer_url": "Model tokenizer endpoint (optional)",
+        "tokenizerHelp": "For TEI channels, leave blank to use the channel’s /tokenize endpoint. Other channels need a TEI-compatible endpoint using the same model tokenizer. Defaults of 512 / 4 suit BCE; verify the input limit and pair special tokens when changing models."
+      },
       "cacheFollowPlugin": {
         "title": "Cache Follow Plugin",
         "description": "Supports prompt_cache_key-based targeted channel follow and user-scoped cache-follow by default, helping improve upstream cache hit rate. Generic cache-follow can be enabled explicitly when needed. Disabled by default.",

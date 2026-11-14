@@ -254,6 +254,14 @@ func (m *Meta) ClearValues() {
 	clear(m.values)
 }
 
+// Fork preserves routing, tenant and billing context while isolating per-call plugin state.
+// Internal rerank batches must not inherit cache hits or response state from another batch.
+func (m *Meta) Fork() *Meta {
+	copy := *m
+	copy.values = make(map[string]any)
+	return &copy
+}
+
 func (m *Meta) Set(key string, value any) {
 	m.values[key] = value
 }

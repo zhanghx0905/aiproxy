@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -20,6 +21,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
+	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/labring/aiproxy/core/relay/plugin"
 	"github.com/labring/aiproxy/core/relay/plugin/noop"
 	"github.com/labring/aiproxy/core/relay/utils"
@@ -269,6 +271,15 @@ func (c *Cache) ConvertRequest(
 	// Generate hash as cache key
 	hash := sha256.Sum256(body)
 	cacheKey := fmt.Sprintf("%d:%s", meta.Mode, hex.EncodeToString(hash[:]))
+	// 分窗参数会改变同一请求的排序，不能复用之前截断模式或其他窗口配置的缓存。
+	if meta.Mode == mode.Rerank && len(meta.ModelConfig.Plugin["rerank_window"]) > 0 {
+		windowConfig, err := json.Marshal(meta.ModelConfig.Plugin["rerank_window"])
+		if err != nil {
+			return adaptor.ConvertResult{}, err
+		}
+		windowHash := sha256.Sum256(windowConfig)
+		cacheKey += ":rerank_window:" + hex.EncodeToString(windowHash[:])
+	}
 	setCacheKey(meta, cacheKey)
 
 	// Check cache

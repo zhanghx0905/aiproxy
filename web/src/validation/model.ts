@@ -24,8 +24,35 @@ const engineConfigSchema = z.object({
     spec: z.union([googleSpecSchema, bingSpecSchema, arxivSpecSchema, searchXNGSpecSchema]).optional()
 })
 
+/** Validate window limits together so the query and document can share the model context. */
+export const rerankWindowSchema = z.object({
+    enable: z.boolean(),
+    tokenizer_url: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).or(z.literal('')).optional(),
+    max_tokens: z.number().int().min(16).max(131072).optional(),
+    special_tokens: z.number().int().min(0).optional(),
+    safety_tokens: z.number().int().min(0).optional(),
+    overlap_tokens: z.number().int().min(0).optional(),
+    batch_size: z.number().int().min(1).max(128).optional(),
+    max_windows: z.number().int().min(1).max(8192).optional(),
+    max_document_tokens: z.number().int().min(1).max(131072).optional(),
+    timeout_seconds: z.number().int().min(1).max(600).optional(),
+}).superRefine((value, ctx) => {
+    if (!value.enable) return
+    const maxTokens = value.max_tokens ?? 512
+    if ((value.special_tokens ?? 4) + (value.safety_tokens ?? 8) >= maxTokens) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['max_tokens'], message: 'Token limit must exceed special and safety tokens' })
+    }
+    if ((value.overlap_tokens ?? 80) >= maxTokens) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['overlap_tokens'], message: 'Overlap must be smaller than the token limit' })
+    }
+    if ((value.max_windows ?? 2048) < (value.batch_size ?? 32)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['max_windows'], message: 'Window limit must be at least the batch size' })
+    }
+})
+
 // 插件配置验证 - 根据用户需求调整
 const pluginSchema = z.object({
+    rerank_window: rerankWindowSchema.optional(),
     cache: z.object({
         enable: z.boolean(),
         ttl: z.number().optional(),

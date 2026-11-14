@@ -1,6 +1,25 @@
 import { describe, expect, it } from 'vitest'
 
-import { priceSchema, retryBudgetSchema } from './model'
+import { priceSchema, retryBudgetSchema, rerankWindowSchema } from './model'
+
+describe('rerank window limits', () => {
+    it('supports BCE defaults and stores a model tokenizer endpoint', () => {
+        const value = { enable: true, max_tokens: 512, overlap_tokens: 80, tokenizer_url: 'http://tei:80/tokenize' }
+        expect(rerankWindowSchema.parse(value)).toEqual(value)
+    })
+    it.each([
+        { max_tokens: 32, overlap_tokens: 32 },
+        { max_tokens: 16, special_tokens: 10, safety_tokens: 8 },
+        { max_windows: 16, batch_size: 32 },
+        { batch_size: 0 },
+        { batch_size: 1.5 },
+        { timeout_seconds: 601 },
+        { max_document_tokens: 0 },
+        { tokenizer_url: 'file:///etc/passwd' },
+    ])('rejects unsafe settings %j', value => {
+        expect(rerankWindowSchema.safeParse({ enable: true, ...value }).success).toBe(false)
+    })
+})
 
 describe('retry budget validation', () => {
     it.each([0, 1, 60, 180])('accepts %s seconds', value => {
