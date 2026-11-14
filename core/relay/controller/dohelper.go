@@ -103,6 +103,19 @@ func DoHelper(
 	*BodyDetail,
 	adaptor.Error,
 ) {
+	// Most relays finish upstream work for accounting even if the client disconnects.
+	return DoHelperWithContext(context.Background(), a, c, meta, store, opts...)
+}
+
+// DoHelperWithContext runs the same adapter pipeline with an explicit upstream lifetime.
+func DoHelperWithContext(
+	ctx context.Context,
+	a adaptor.Adaptor,
+	c *gin.Context,
+	meta *meta.Meta,
+	store adaptor.Store,
+	opts ...BodyDetailOption,
+) (adaptor.DoResponseResult, *BodyDetail, adaptor.Error) {
 	detail := BodyDetail{}
 	detailOption := mergeBodyDetailOptions(opts...)
 
@@ -111,9 +124,6 @@ func DoHelper(
 	} else {
 		detail.RequestBody = requestBody
 	}
-
-	// donot use c.Request.Context() because it will be canceled by the client
-	ctx := context.Background()
 
 	resp, err := prepareAndDoRequest(ctx, a, c, meta, store)
 	if err != nil {
@@ -138,7 +148,10 @@ func DoHelper(
 
 	result, relayErr := handleResponse(a, c, meta, store, resp, &detail, detailOption)
 	if relayErr != nil {
-		return adaptor.DoResponseResult{}, &detail, relayErr
+		if !result.PartialUsage {
+			result = adaptor.DoResponseResult{}
+		}
+		return result, &detail, relayErr
 	}
 
 	log := common.GetLogger(c)
@@ -167,7 +180,7 @@ func prepareAndDoRequest(
 
 	convertResult, err := a.ConvertRequest(meta, store, c.Request)
 	if err != nil {
-		return nil, mapRequestError(meta, err, http.StatusBadRequest, "convert request failed")
+		return nil, MapRequestError(meta, err, http.StatusBadRequest, "convert request failed")
 	}
 
 	var req *http.Request
@@ -228,7 +241,8 @@ func closeRequestReader(r io.Reader) {
 	}
 }
 
-func mapRequestError(
+// MapRequestError preserves upstream and cancellation status across request execution.
+func MapRequestError(
 	meta *meta.Meta,
 	err error,
 	fallbackStatusCode int,
@@ -315,7 +329,7 @@ func doRequest(
 ) (*http.Response, adaptor.Error) {
 	resp, err := a.DoRequest(meta, store, c, req)
 	if err != nil {
-		return nil, mapRequestError(meta, err, http.StatusInternalServerError, "request error")
+		return nil, MapRequestError(meta, err, http.StatusInternalServerError, "request error")
 	}
 
 	return resp, nil

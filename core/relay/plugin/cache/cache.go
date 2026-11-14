@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -20,6 +21,7 @@ import (
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
 	"github.com/labring/aiproxy/core/relay/meta"
+	"github.com/labring/aiproxy/core/relay/mode"
 	"github.com/labring/aiproxy/core/relay/plugin"
 	"github.com/labring/aiproxy/core/relay/plugin/noop"
 	"github.com/labring/aiproxy/core/relay/utils"
@@ -29,9 +31,10 @@ import (
 
 // Constants for cache metadata keys
 const (
-	cacheKey   = "cache_key"
-	cacheHit   = "cache_hit"
-	cacheValue = "cache_value"
+	cacheKey      = "cache_key"
+	cacheHit      = "cache_hit"
+	cacheValue    = "cache_value"
+	windowedCache = "windowed_rerank_cache"
 )
 
 // Constants for plugin configuration
@@ -57,8 +60,9 @@ type Item struct {
 // Cache implements caching functionality for AI requests
 type Cache struct {
 	noop.Noop
-	rdb         *redis.Client
-	configCache utils.PluginConfigCache[Config]
+	rdb              *redis.Client
+	checkWindowedHit func(*gin.Context, *meta.Meta, model.Usage) adaptor.Error
+	configCache      utils.PluginConfigCache[Config]
 }
 
 var (
@@ -87,8 +91,11 @@ func jitterCacheTTL(ttl time.Duration) time.Duration {
 }
 
 // NewCachePlugin creates a new cache plugin
-func NewCachePlugin(rdb *redis.Client) plugin.Plugin {
-	return &Cache{rdb: rdb}
+func NewCachePlugin(
+	rdb *redis.Client,
+	checkWindowedHit func(*gin.Context, *meta.Meta, model.Usage) adaptor.Error,
+) plugin.Plugin {
+	return &Cache{rdb: rdb, checkWindowedHit: checkWindowedHit}
 }
 
 // Cache metadata helpers
@@ -269,6 +276,33 @@ func (c *Cache) ConvertRequest(
 	// Generate hash as cache key
 	hash := sha256.Sum256(body)
 	cacheKey := fmt.Sprintf("%d:%s", meta.Mode, hex.EncodeToString(hash[:]))
+	if meta.Mode == mode.Rerank && len(meta.ModelConfig.Plugin["rerank_window"]) > 0 {
+		var windowing struct {
+			Enable bool `json:"enable"`
+		}
+		if err := meta.ModelConfig.LoadPluginConfig("rerank_window", &windowing); err != nil {
+			return adaptor.ConvertResult{}, err
+		}
+
+		if windowing.Enable {
+			// Rankings depend on the actual scorer, tokenizer and any provider request patches.
+			windowConfig, err := json.Marshal(map[string]any{
+				"window":   meta.ModelConfig.Plugin["rerank_window"],
+				"patch":    meta.ModelConfig.Plugin["patch"],
+				"channel":  meta.ChannelMonitorKey(),
+				"base_url": meta.Channel.BaseURL,
+				"model":    meta.ActualModel,
+			})
+			if err != nil {
+				return adaptor.ConvertResult{}, err
+			}
+
+			windowHash := sha256.Sum256(windowConfig)
+			cacheKey += ":rerank_window:v2:" + hex.EncodeToString(windowHash[:])
+			meta.Set(windowedCache, true)
+		}
+	}
+
 	setCacheKey(meta, cacheKey)
 
 	// Check cache
@@ -290,6 +324,11 @@ func (c *Cache) DoRequest(
 	do adaptor.DoRequest,
 ) (*http.Response, error) {
 	if isCacheHit(meta) {
+		if c.checkWindowedHit != nil && meta.GetBool(windowedCache) {
+			if err := c.checkWindowedHit(ctx, meta, getCacheItem(meta).Usage); err != nil {
+				return nil, err
+			}
+		}
 		return &http.Response{}, nil
 	}
 

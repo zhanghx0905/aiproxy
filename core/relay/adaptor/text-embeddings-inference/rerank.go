@@ -117,9 +117,9 @@ func convertRequestError(meta *meta.Meta, message string) adaptor.Error {
 type RerankResponse []RerankResponseItem
 
 type RerankResponseItem struct {
-	Index int     `json:"index"`
-	Score float64 `json:"score"`
-	Text  string  `json:"text,omitempty"`
+	Index *int     `json:"index"`
+	Score *float64 `json:"score"`
+	Text  string   `json:"text,omitempty"`
 }
 
 func (rri *RerankResponseItem) ToRerankModel() *relaymodel.RerankResult {
@@ -131,8 +131,8 @@ func (rri *RerankResponseItem) ToRerankModel() *relaymodel.RerankResult {
 	}
 
 	return &relaymodel.RerankResult{
-		Index:          rri.Index,
-		RelevanceScore: rri.Score,
+		Index:          *rri.Index,
+		RelevanceScore: *rri.Score,
 		Document:       document,
 	}
 }
@@ -168,6 +168,11 @@ func RerankHandler(
 
 	results := make([]*relaymodel.RerankResult, len(respSlice))
 	for i, v := range respSlice {
+		if v.Index == nil || v.Score == nil {
+			return adaptor.DoResponseResult{}, relaymodel.WrapperErrorWithMessage(
+				meta.Mode, http.StatusBadGateway, "TEI rerank result is missing a score or index",
+			)
+		}
 		results[i] = v.ToRerankModel()
 	}
 

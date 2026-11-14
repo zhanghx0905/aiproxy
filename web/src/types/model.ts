@@ -1,4 +1,7 @@
 // src/types/model.ts
+import type { z } from 'zod'
+import type { rerankWindowSchema } from '@/validation/model'
+
 export interface ModelConfigDetail {
     max_input_tokens?: number
     max_output_tokens?: number
@@ -113,6 +116,7 @@ export const RESOLUTION_FUZZY_MATCH_SUPPORTED_MODEL_TYPES = [5, 6, 13, 22, 26, 2
 export type ModelTypeOption = (typeof MODEL_TYPE_OPTIONS)[number]
 
 type Plugin = {
+    rerank_window?: z.infer<typeof rerankWindowSchema>
     cache: CachePlugin // 缓存插件
     cachefollow: CacheFollowPlugin // 缓存跟随插件
     "web-search": WebSearchPlugin // 网络搜索插件

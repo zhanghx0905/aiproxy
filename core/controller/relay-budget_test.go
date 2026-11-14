@@ -15,6 +15,7 @@ import (
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
+	"github.com/labring/aiproxy/core/relay/adaptor"
 	relaycontroller "github.com/labring/aiproxy/core/relay/controller"
 	"github.com/labring/aiproxy/core/relay/meta"
 	"github.com/labring/aiproxy/core/relay/mode"
@@ -262,4 +263,42 @@ func TestRetryPreparationFailurePreservesLastUpstreamResult(t *testing.T) {
 	require.Equal(t, upstreamError, state.result.Error)
 	require.Equal(t, http.StatusBadGateway, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "last upstream failure")
+}
+
+func TestWindowedRerankBudgetChecksAndRejectsWithoutRetry(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/rerank", nil)
+
+	m := meta.NewMeta(nil, mode.Rerank, "rerank-budget-test", model.ModelConfig{
+		Model: "rerank-budget-test", TPM: 20, Price: model.Price{InputPrice: 1000},
+	}, meta.WithGroup(model.GroupCache{ID: "rerank-budget-test"}))
+	usage := model.Usage{InputTokens: 21, TotalTokens: 21}
+
+	var checked float64
+	allow := false
+	c.Set(middleware.GroupBalance, &middleware.GroupBalanceConsumer{
+		CheckBalance: func(amount float64) bool {
+			checked = amount
+			return allow
+		},
+	})
+
+	denied := checkWindowedRerankBudget(c, m, usage)
+	require.NotNil(t, denied)
+	require.Equal(t, http.StatusForbidden, denied.StatusCode())
+	require.Equal(t, relayRequiredBalance(m, usage, m.ModelConfig.Price), checked)
+	require.Greater(t, checked, relayRequiredBalance(m, model.Usage{}, m.ModelConfig.Price))
+
+	allow = true
+	exhausted := checkWindowedRerankBudget(c, m, usage)
+	require.NotNil(t, exhausted)
+	require.Equal(t, http.StatusTooManyRequests, exhausted.StatusCode())
+	require.Nil(t, checkWindowedRerankBudget(c, m, model.Usage{InputTokens: 20, TotalTokens: 20}))
+
+	for _, err := range []adaptor.Error{denied, exhausted} {
+		_, retry := RelayHelper(c, m, func(*gin.Context, *meta.Meta) *relaycontroller.HandleResult {
+			return &relaycontroller.HandleResult{Error: err}
+		})
+		require.False(t, retry)
+	}
 }

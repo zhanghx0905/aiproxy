@@ -15,6 +15,7 @@ import (
 
 // HandleResult contains all the information needed for consumption recording
 type HandleResult struct {
+	PartialUsage bool
 	Error        adaptor.Error
 	Usage        model.Usage
 	UsageContext model.UsageContext
@@ -88,6 +89,7 @@ func Handle(
 
 		return &HandleResult{
 			Error:        respErr,
+			PartialUsage: result.PartialUsage,
 			Usage:        result.Usage,
 			UsageContext: result.UsageContext,
 			UpstreamID:   result.UpstreamID,

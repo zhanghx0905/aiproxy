@@ -18,6 +18,7 @@ import (
 	"github.com/labring/aiproxy/core/common/config"
 	"github.com/labring/aiproxy/core/common/consume"
 	"github.com/labring/aiproxy/core/common/conv"
+	"github.com/labring/aiproxy/core/common/reqlimit"
 	"github.com/labring/aiproxy/core/middleware"
 	"github.com/labring/aiproxy/core/model"
 	"github.com/labring/aiproxy/core/relay/adaptor"
@@ -31,6 +32,7 @@ import (
 	"github.com/labring/aiproxy/core/relay/plugin/cachefollow"
 	monitorplugin "github.com/labring/aiproxy/core/relay/plugin/monitor"
 	"github.com/labring/aiproxy/core/relay/plugin/patch"
+	"github.com/labring/aiproxy/core/relay/plugin/rerankwindow"
 	"github.com/labring/aiproxy/core/relay/plugin/streamfake"
 	"github.com/labring/aiproxy/core/relay/plugin/thinksplit"
 	"github.com/labring/aiproxy/core/relay/plugin/timeout"
@@ -238,8 +240,9 @@ func (s *scopedAdaptorStore) SaveIfNotExistStore(
 func wrapPlugin(ctx context.Context, mc *model.ModelCaches, a adaptor.Adaptor) adaptor.Adaptor {
 	return plugin.WrapperAdaptor(a,
 		monitorplugin.NewGroupMonitorPlugin(),
-		cache.NewCachePlugin(common.RDB),
+		cache.NewCachePlugin(common.RDB, checkWindowedRerankBudget),
 		cachefollow.NewCacheFollowPlugin(),
+		rerankwindow.NewPlugin(checkWindowedRerankBudget),
 		streamfake.NewStreamFakePlugin(),
 		timeout.NewTimeoutPlugin(),
 		websearch.NewWebSearchPlugin(func(modelName string) (*model.Channel, error) {
@@ -248,6 +251,58 @@ func wrapPlugin(ctx context.Context, mc *model.ModelCaches, a adaptor.Adaptor) a
 		thinksplit.NewThinkPlugin(),
 		monitorplugin.NewChannelMonitorPlugin(),
 		patch.NewPatchPlugin(),
+		rerankwindow.NewBatchValidator(),
+	)
+}
+
+type budgetCause = adaptor.Error
+type rerankBudgetError struct{ budgetCause }
+
+func checkWindowedRerankBudget(c *gin.Context, m *meta.Meta, usage model.Usage) adaptor.Error {
+	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
+	required := relayRequiredBalance(m, usage, m.ModelConfig.Price)
+	if gbc == nil || !gbc.CheckBalance(required) {
+		return rerankBudgetError{relaymodel.WrapperErrorWithMessage(
+			m.Mode, http.StatusForbidden,
+			fmt.Sprintf("group (%s) balance not enough", m.Group.ID),
+			relaymodel.WithType(middleware.GroupBalanceNotEnough),
+		)}
+	}
+
+	limit := m.ModelConfig.TPM
+	if limit <= 0 || m.Group.Status == model.GroupStatusInternal {
+		return nil
+	}
+
+	ctx := c.Request.Context()
+	var used int64
+	if m.Channel.Scope == model.ChannelScopeGroup {
+		used, _ = reqlimit.GetGroupChannelModelTokensRequest(ctx, m.Group.ID, strconv.Itoa(m.Channel.ID), m.OriginModel)
+	} else {
+		used, _ = reqlimit.GetGroupModelTokensRequest(ctx, m.Group.ID, m.OriginModel)
+	}
+
+	if int64(usage.TotalTokens) > limit-used {
+		return rerankBudgetError{relaymodel.WrapperErrorWithMessage(
+			m.Mode, http.StatusTooManyRequests, "windowed rerank exceeds the remaining model token budget",
+		)}
+	}
+
+	return nil
+}
+
+func relayRequiredBalance(m *meta.Meta, usage model.Usage, price model.Price) float64 {
+	if m.Channel.Scope == model.ChannelScopeGroup {
+		return middleware.GroupMinimumBalance
+	}
+
+	return math.Max(
+		consume.CalculateAmountWithOptions(http.StatusOK, usage, m.RequestUsageContext, price,
+			model.PriceSelectionOptions{
+				DisableResolutionFuzzyMatch: m.ModelConfig.DisableResolutionFuzzyMatch,
+				RequestAt:                   m.RequestAt,
+			}),
+		middleware.GroupMinimumBalance,
 	)
 }
 
@@ -350,6 +405,10 @@ func RelayHelper(
 ) (*controller.HandleResult, bool) {
 	result := handel(c, meta)
 	if result.Error == nil {
+		return result, false
+	}
+
+	if _, ok := errors.AsType[rerankBudgetError](result.Error); ok {
 		return result, false
 	}
 
@@ -571,22 +630,7 @@ func relay(c *gin.Context, mode mode.Mode, relayController RelayController) {
 
 	gbc := middleware.GetGroupBalanceConsumerFromContext(c)
 
-	requiredBalance := math.Max(
-		consume.CalculateAmountWithOptions(
-			http.StatusOK,
-			attempt.meta.RequestUsage,
-			attempt.meta.RequestUsageContext,
-			attempt.price,
-			model.PriceSelectionOptions{
-				DisableResolutionFuzzyMatch: attempt.modelConfig.DisableResolutionFuzzyMatch,
-				RequestAt:                   attempt.meta.RequestAt,
-			},
-		),
-		middleware.GroupMinimumBalance,
-	)
-	if attempt.channel.isGroupChannel() {
-		requiredBalance = middleware.GroupMinimumBalance
-	}
+	requiredBalance := relayRequiredBalance(attempt.meta, attempt.meta.RequestUsage, attempt.price)
 
 	if !gbc.CheckBalance(requiredBalance) {
 		middleware.AbortLogWithMessageWithMode(mode, c,
@@ -691,6 +735,10 @@ func recordResult(
 			code,
 			forceSaveDetail,
 		)
+	}
+
+	if result.PartialUsage {
+		price = model.Price{}
 	}
 
 	gbc := middleware.GetGroupBalanceConsumerFromContext(c)

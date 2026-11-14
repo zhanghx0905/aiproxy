@@ -417,6 +417,10 @@ export function ModelTable() {
 
         const enabledPlugins = [];
 
+        if (plugin.rerank_window?.enable) {
+          enabledPlugins.push(t("model.dialog.rerankWindow.title"));
+        }
+
         if (plugin.cache?.enable) {
           enabledPlugins.push(t("model.cachePlugin"));
         }

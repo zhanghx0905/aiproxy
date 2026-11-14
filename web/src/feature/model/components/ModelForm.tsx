@@ -59,6 +59,7 @@ import { useState } from 'react'
 import { ENV } from '@/utils/env'
 import { PriceFormFields } from '@/components/price/PriceFormFields'
 import { ValidationErrorDisplay } from '@/components/common/error/validationErrorDisplay'
+import { RerankWindowFields } from './RerankWindowFields'
 
 type PendingUpdate = {
     model: string
@@ -124,6 +125,7 @@ const MANAGED_MODEL_KEYS = new Set([
 ])
 
 const MANAGED_PLUGIN_KEYS = {
+    rerank_window: new Set(['enable', 'tokenizer_url', 'max_tokens', 'special_tokens', 'safety_tokens', 'overlap_tokens', 'batch_size', 'max_windows', 'max_document_tokens', 'timeout_seconds']),
     cache: new Set([
         'enable',
         'ttl',
@@ -238,6 +240,7 @@ const normalizePluginForCompare = (plugin: unknown) => {
     if (!source) return undefined
 
     return {
+        rerank_window: pickManagedFields(source.rerank_window, MANAGED_PLUGIN_KEYS.rerank_window),
         cache: pickManagedFields(source.cache, MANAGED_PLUGIN_KEYS.cache),
         cachefollow: pickManagedFields(source.cachefollow, MANAGED_PLUGIN_KEYS.cachefollow),
         'web-search': pickManagedFields(source['web-search'], MANAGED_PLUGIN_KEYS['web-search']),
@@ -433,6 +436,7 @@ export function ModelForm({
             disable_resolution_fuzzy_match: defaultValues.disable_resolution_fuzzy_match ?? false,
             price: defaultValues.price || {},
             plugin: {
+                rerank_window: { enable: false, ...defaultValues.plugin?.rerank_window },
                 cache: { enable: false, ...defaultValues.plugin?.cache },
                 cachefollow: { enable: false, ...defaultValues.plugin?.cachefollow },
                 "web-search": { enable: false, search_from: [], ...defaultValues.plugin?.["web-search"] },
@@ -768,8 +772,16 @@ export function ModelForm({
 
         const existingPlugin = (baseModelConfig?.plugin || {}) as Record<string, unknown>
         const mergedPlugin: Record<string, unknown> = Object.fromEntries(
-            Object.entries(existingPlugin).filter(([key]) => !['cache', 'cachefollow', 'web-search', 'think-split', 'stream-fake'].includes(key))
+            Object.entries(existingPlugin).filter(([key]) => !['cache', 'cachefollow', 'web-search', 'think-split', 'stream-fake', 'rerank_window'].includes(key))
         )
+
+        if (data.type === 10 && data.plugin?.rerank_window?.enable) {
+            const existing = (baseModelConfig?.plugin?.rerank_window ?? {}) as Record<string, unknown>
+            mergedPlugin.rerank_window = {
+                ...Object.fromEntries(Object.entries(existing).filter(([key]) => !MANAGED_PLUGIN_KEYS.rerank_window.has(key))),
+                ...Object.fromEntries(Object.entries(data.plugin.rerank_window).filter(([, value]) => value !== undefined && value !== '')),
+            }
+        }
 
         if (data.plugin?.cache?.enable) {
             const existingCachePlugin = (baseModelConfig?.plugin?.cache || {}) as Record<string, unknown>
@@ -1865,6 +1877,8 @@ export function ModelForm({
                         </div>
 
                         <hr className="border-border" />
+
+                        {watchedType === 10 && <RerankWindowFields control={form.control} />}
 
                         {/* Cache Follow Plugin */}
                         <div className="flex items-center justify-between py-2">

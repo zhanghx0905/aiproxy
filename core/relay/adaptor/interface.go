@@ -76,6 +76,9 @@ type DoRequest interface {
 
 // DoResponseResult contains the result of DoResponse
 type DoResponseResult struct {
+	// PartialUsage records work completed before a failed response. It is counted in usage
+	// and rate monitoring without charging for the failed request.
+	PartialUsage bool
 	Usage        model.Usage
 	UsageContext model.UsageContext
 	UpstreamID   string // ID from response body or x-request-id header
